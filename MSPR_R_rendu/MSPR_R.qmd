@@ -1,0 +1,238 @@
+---
+title: "MSPR R — Analyse de la performance automobile avec mtcars enrichi"
+author: "Adam Sawi"
+date: "2026-05-26"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Introduction
+
+Ce rapport présente une analyse de la performance automobile à partir du dataset `mtcars`, enrichi afin de rendre l'interprétation plus lisible d'un point de vue métier. L'objectif est d'identifier les variables qui influencent la consommation, de comparer différents profils de véhicules et de proposer des recommandations exploitables.
+
+## 1. Chargement de l'environnement et préparation des données
+
+```{r}
+set.seed(123)
+
+library(tidyverse)
+library(janitor)
+library(plotly)
+library(skimr)
+library(broom)
+```
+
+```{r}
+# Import des données avec chemin relatif
+
+donnees_brutes <- read_csv("data/mtcars_enrichi.csv", show_col_types = FALSE)
+
+# Nettoyage et typage
+
+donnees_clean <- donnees_brutes %>%
+  clean_names() %>%
+  distinct() %>%
+  mutate(
+    transmission = factor(transmission),
+    moteur = factor(moteur),
+    carburateur = factor(carburateur),
+    cylindres = factor(cylindres)
+  )
+
+# Vérifications
+
+dim(donnees_clean)
+colSums(is.na(donnees_clean))
+glimpse(donnees_clean)
+```
+
+```{r}
+# Description des variables
+skim(donnees_clean)
+```
+
+Les données sont propres, sans valeurs manquantes, et directement exploitables pour l'analyse. Le jeu a été enrichi avec des variables plus lisibles comme le type de transmission, le type de moteur, le nombre de cylindres, la performance relative et la consommation en litres aux 100 km.
+
+## 2. Analyse exploratoire visuelle
+
+```{r}
+# Graphique 1 : consommation selon la transmission
+
+ggplot(donnees_clean, aes(x = transmission, y = mpg, fill = transmission)) +
+  geom_boxplot(alpha = 0.8) +
+  scale_fill_manual(values = c("#264653", "#2A9D8F")) +
+  labs(
+    title = "Consommation (mpg) selon le type de transmission",
+    x = "Transmission",
+    y = "Miles par gallon",
+    fill = "Transmission"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Graphique 2 : relation poids / consommation
+
+ggplot(donnees_clean, aes(x = wt, y = mpg, color = transmission)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_manual(values = c("#E76F51", "#1D3557")) +
+  labs(
+    title = "Relation entre le poids du véhicule et la consommation",
+    x = "Poids (1000 lbs)",
+    y = "Miles par gallon",
+    color = "Transmission"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Graphique 3 : puissance moyenne par nombre de cylindres
+
+donnees_clean %>%
+  group_by(cylindres) %>%
+  summarise(puissance_moyenne = mean(hp), .groups = "drop") %>%
+  ggplot(aes(x = cylindres, y = puissance_moyenne, fill = cylindres)) +
+  geom_col(width = 0.6) +
+  scale_fill_manual(values = c("#8ECAE6", "#219EBC", "#023047")) +
+  labs(
+    title = "Puissance moyenne selon le nombre de cylindres",
+    x = "Nombre de cylindres",
+    y = "Puissance moyenne (hp)",
+    fill = "Cylindres"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Graphique interactif plotly
+
+graph_interactif <- ggplot(
+  donnees_clean,
+  aes(
+    x = hp,
+    y = mpg,
+    color = transmission,
+    text = paste(
+      "Modèle :", modele,
+      "<br>Puissance :", hp,
+      "<br>Consommation :", mpg,
+      "<br>Poids :", wt
+    )
+  )
+) +
+  geom_point(size = 3) +
+  labs(title = "Consommation et puissance des véhicules") +
+  theme_minimal()
+
+ggplotly(graph_interactif, tooltip = "text")
+```
+
+```{r}
+# Matrice de corrélation visualisée
+
+matrice_corr <- donnees_clean %>%
+  select(mpg, disp, hp, drat, wt, qsec, performance, consommation_l_100) %>%
+  cor()
+
+matrice_corr_df <- as.data.frame(as.table(matrice_corr))
+
+ggplot(matrice_corr_df, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Freq, 2)), size = 3) +
+  scale_fill_gradient2(low = "#6D597A", mid = "white", high = "#E56B6F", midpoint = 0) +
+  labs(
+    title = "Matrice de corrélation des variables quantitatives",
+    x = "Variable",
+    y = "Variable",
+    fill = "Corrélation"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+L'analyse visuelle met en évidence plusieurs tendances : les véhicules manuels sont globalement plus sobres, le poids dégrade fortement l'efficacité énergétique, et l'augmentation du nombre de cylindres s'accompagne d'une hausse de la puissance moyenne. La matrice de corrélation confirme le rôle central du poids, de la cylindrée et de la puissance.
+
+## 3. Statistiques inférentielles
+
+```{r}
+# Test d'hypothèse : consommation selon la transmission
+
+test_transmission <- t.test(mpg ~ transmission, data = donnees_clean)
+test_transmission
+```
+
+Le test t est pertinent ici car il compare la moyenne de consommation de deux groupes indépendants : véhicules automatiques et manuels. La p-value obtenue permet d'évaluer si l'écart observé est statistiquement significatif.
+
+```{r}
+# Régression linéaire multiple
+# Variable cible : mpg
+# Variables retenues : wt, hp, qsec, am
+# Justification : ces variables couvrent le poids, la puissance,
+# le comportement dynamique et le type de transmission.
+
+modele_1 <- lm(mpg ~ wt + hp + qsec + am, data = donnees_clean)
+summary(modele_1)
+```
+
+```{r}
+# Modèle alternatif
+
+modele_2 <- lm(mpg ~ wt + disp + cyl + am, data = donnees_clean)
+summary(modele_2)
+
+AIC(modele_1, modele_2)
+BIC(modele_1, modele_2)
+```
+
+```{r}
+# Performance du modèle
+
+predictions <- augment(modele_1, newdata = donnees_clean)
+rmse_modele_1 <- sqrt(mean((predictions$.resid)^2))
+r2_modele_1 <- summary(modele_1)$r.squared
+
+cat("R² :", round(r2_modele_1, 3), "\n")
+cat("RMSE :", round(rmse_modele_1, 3), "\n")
+```
+
+```{r}
+# Diagnostic du modèle
+
+par(mfrow = c(2, 2))
+plot(modele_1)
+par(mfrow = c(1, 1))
+```
+
+Le modèle de régression multiple explique une part importante de la variabilité de la consommation. Le poids a un effet négatif clair sur `mpg`, tandis que la transmission manuelle semble associée à une meilleure efficacité. Le diagnostic graphique permet de vérifier visuellement les hypothèses du modèle, même si la taille réduite de l'échantillon impose de rester prudent dans la généralisation.
+
+## 4. Conclusion business
+
+L'analyse permet de formuler plusieurs recommandations à destination de la direction :
+
+1. **Réduire le poids moyen des véhicules** : le poids apparaît comme l'un des facteurs les plus pénalisants pour la consommation.
+2. **Favoriser les motorisations les plus efficientes** : les véhicules manuels consomment en moyenne environ 7 mpg de moins que les automatiques.
+3. **Cibler les segments 4 cylindres pour les offres économiques** : ils offrent un bon compromis entre consommation et puissance.
+4. **Optimiser le compromis puissance / consommation** : l'augmentation de la puissance ne s'accompagne pas d'un gain d'efficacité énergétique.
+5. **Utiliser un modèle prédictif simple pour le pilotage** : quelques variables mécaniques suffisent déjà à prédire correctement la consommation.
+
+### Limites de l'étude
+
+- le dataset `mtcars` contient peu d'observations ;
+- les véhicules analysés ne sont pas représentatifs du parc automobile actuel ;
+- certaines variables importantes sont absentes : prix, émissions CO2, kilométrage réel, usage.
+
+### Pistes d'amélioration
+
+- enrichir l'analyse avec un dataset open data plus récent ;
+- intégrer des variables économiques et environnementales ;
+- comparer plusieurs modèles prédictifs ;
+- approfondir la segmentation des véhicules par usage ou gamme.
